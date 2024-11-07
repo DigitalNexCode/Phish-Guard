@@ -9,8 +9,20 @@ import smtplib
 from email.mime.text import MIMEText
 import requests
 
-# Load environment variables from .env file
-load_dotenv()
+# Try to load .env file, but don't fail if it doesn't exist
+try:
+    load_dotenv()
+except:
+    pass
+
+# Get secrets from environment variables or Streamlit secrets
+def get_api_key():
+    # First try to get from streamlit secrets
+    try:
+        return st.secrets["GEMINI_API_KEY"]
+    except:
+        # If not in secrets, try environment variables
+        return os.getenv("GEMINI_API_KEY")
 
 # Initialize session state for API key if it doesn't exist
 if 'gemini_api_key' not in st.session_state:
@@ -69,7 +81,7 @@ def analyze_question(question, reasoning):
     summarized_reasoning = summary_response.get("content", "Unable to summarize reasoning.")
 
     api_url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent"
-    api_key = os.getenv('GEMINI_API_KEY')
+    api_key = get_api_key()
 
     if not api_key:
         return {"content": "API key not found."}
@@ -341,7 +353,7 @@ def register_page():
 
 def summarize_reasoning(reasoning):
     api_url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent"
-    api_key = os.getenv('GEMINI_API_KEY')
+    api_key = get_api_key()
 
     if not api_key:
         return {"content": "API key not found."}

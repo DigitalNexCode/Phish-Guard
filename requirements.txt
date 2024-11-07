@@ -1,0 +1,6 @@
+streamlit
+python-dotenv
+requests
+google-generativeai
+clerk
+# Add any other packages your app needs
