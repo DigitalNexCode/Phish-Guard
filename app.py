@@ -8,6 +8,7 @@ import os
 import smtplib
 from email.mime.text import MIMEText
 import requests
+import hashlib  # For password hashing
 
 # Try to load .env file, but don't fail if it doesn't exist
 try:
@@ -30,32 +31,85 @@ if 'gemini_api_key' not in st.session_state:
 
 # Database setup
 def init_db():
-    conn = sqlite3.connect("user_data.db")
-    c = conn.cursor()
-    c.execute('''CREATE TABLE IF NOT EXISTS users
-                 (username TEXT PRIMARY KEY, password TEXT)''')
-    conn.commit()
-    conn.close()
-
-def signup(username, password):
-    conn = sqlite3.connect("user_data.db")
-    c = conn.cursor()
+    """Initialize SQLite database"""
     try:
-        c.execute("INSERT INTO users (username, password) VALUES (?, ?)", (username, password))
+        conn = sqlite3.connect("user_data.db", check_same_thread=False)
+        c = conn.cursor()
+        # Create users table with proper schema
+        c.execute('''CREATE TABLE IF NOT EXISTS users
+                    (username TEXT PRIMARY KEY,
+                     password TEXT NOT NULL,
+                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)''')
         conn.commit()
-        return True
-    except sqlite3.IntegrityError:
-        return False
+    except sqlite3.Error as e:
+        st.error(f"Database initialization error: {e}")
     finally:
-        conn.close()
+        if 'conn' in locals():
+            conn.close()
+
+def hash_password(password):
+    """Hash password for security"""
+    return hashlib.sha256(password.encode()).hexdigest()
 
 def login(username, password):
-    conn = sqlite3.connect("user_data.db")
-    c = conn.cursor()
-    c.execute("SELECT * FROM users WHERE username = ? AND password = ?", (username, password))
-    user = c.fetchone()
-    conn.close()
-    return user is not None
+    """Authenticate user"""
+    try:
+        conn = sqlite3.connect("user_data.db", check_same_thread=False)
+        c = conn.cursor()
+        hashed_password = hash_password(password)
+        
+        # Print debug information
+        print(f"Attempting login for username: {username}")
+        
+        c.execute("SELECT * FROM users WHERE username = ? AND password = ?", 
+                 (username, hashed_password))
+        result = c.fetchone()
+        
+        # Print debug information
+        print(f"Login query result: {result}")
+        
+        return result is not None
+    except sqlite3.Error as e:
+        print(f"Login error: {e}")  # Debug print
+        st.error(f"Login error: {e}")
+        return False
+    finally:
+        if 'conn' in locals():
+            conn.close()
+
+def signup(username, password):
+    """Register new user"""
+    try:
+        conn = sqlite3.connect("user_data.db", check_same_thread=False)
+        c = conn.cursor()
+        
+        # Check if username already exists
+        c.execute("SELECT username FROM users WHERE username = ?", (username,))
+        if c.fetchone() is not None:
+            return False
+        
+        # Hash password before storing
+        hashed_password = hash_password(password)
+        
+        # Insert new user
+        c.execute("INSERT INTO users (username, password) VALUES (?, ?)", 
+                 (username, hashed_password))
+        conn.commit()
+        
+        # Print debug information
+        print(f"New user registered: {username}")
+        
+        return True
+    except sqlite3.IntegrityError:
+        print("Username already exists")  # Debug print
+        return False
+    except sqlite3.Error as e:
+        print(f"Registration error: {e}")  # Debug print
+        st.error(f"Registration error: {e}")
+        return False
+    finally:
+        if 'conn' in locals():
+            conn.close()
 
 def get_analysis_history():
     try:
@@ -317,39 +371,62 @@ def app_page():
         st.session_state.page = 'account'
 
 def login_page():
+    """Login page"""
     st.subheader("Login")
-    login_form = st.form(key='login_form')
-    username = login_form.text_input("Username")
-    password = login_form.text_input("Password", type='password')
-    submit = login_form.form_submit_button("Login")
-
-    if submit:
-        if login(username, password):
-            st.session_state.logged_in = True
-            st.session_state.page = 'app'
-            st.success("Logged in successfully!")
-        else:
-            st.error("Invalid username or password.")
-
+    
+    # Create a form for login
+    with st.form("login_form"):
+        username = st.text_input("Username").strip()
+        password = st.text_input("Password", type="password")
+        submit_button = st.form_submit_button("Login")
+        
+        if submit_button:
+            if not username or not password:
+                st.error("Please enter both username and password.")
+            else:
+                if login(username, password):
+                    st.session_state.logged_in = True
+                    st.session_state.username = username
+                    st.session_state.page = 'app'
+                    st.success("Login successful!")
+                    st.rerun()
+                else:
+                    st.error("Invalid username or password.")
+    
+    # Registration button outside the form
     if st.button("Register"):
         st.session_state.page = 'register'
+        st.rerun()
 
 def register_page():
+    """Registration page"""
     st.subheader("Register")
-    signup_form = st.form(key='signup_form')
-    new_username = signup_form.text_input("New Username")
-    new_password = signup_form.text_input("New Password", type='password')
-    submit = signup_form.form_submit_button("Sign Up")
-
-    if submit:
-        if signup(new_username, new_password):
-            st.success("Registration successful! Please login.")
-            st.session_state.page = 'login'
-        else:
-            st.error("Username already exists.")
-
+    
+    # Create a form for registration
+    with st.form("register_form"):
+        username = st.text_input("Username").strip()
+        password = st.text_input("Password", type="password")
+        confirm_password = st.text_input("Confirm Password", type="password")
+        submit_button = st.form_submit_button("Register")
+        
+        if submit_button:
+            if not username or not password or not confirm_password:
+                st.error("Please fill in all fields.")
+            elif password != confirm_password:
+                st.error("Passwords do not match.")
+            elif len(password) < 6:
+                st.error("Password must be at least 6 characters long.")
+            elif signup(username, password):
+                st.success("Registration successful! Please login.")
+                st.session_state.page = 'login'
+                st.rerun()
+            else:
+                st.error("Username already exists or registration failed.")
+    
+    # Login button outside the form
     if st.button("Back to Login"):
         st.session_state.page = 'login'
+        st.rerun()
 
 def summarize_reasoning(reasoning):
     api_url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent"
@@ -398,25 +475,54 @@ def summarize_reasoning(reasoning):
     except requests.exceptions.RequestException as err:
         return {"content": f"API request failed: {err}"}
 
-def main():
-    st.title("Email Phishing Analyzer")
+def init_environment():
+    """Initialize environment variables and API keys"""
+    try:
+        from dotenv import load_dotenv
+        load_dotenv()
+    except ImportError:
+        st.warning("python-dotenv not installed. Using environment variables and secrets only.")
     
-    # Initialize session state attributes
+    # Get API key from secrets or environment
+    try:
+        api_key = st.secrets["GEMINI_API_KEY"]
+    except:
+        api_key = os.getenv("GEMINI_API_KEY")
+    
+    return api_key  # Return just the API key string
+
+# Use in your app
+api_keys = init_environment()
+
+def main():
+    """Main application entry point"""
+    st.title("Phish Guard - Email Analysis Tool")
+    
+    # Initialize session state
     if 'logged_in' not in st.session_state:
         st.session_state.logged_in = False
     if 'page' not in st.session_state:
-        st.session_state.page = 'login'  # Default page is login
+        st.session_state.page = 'login'
+    if 'username' not in st.session_state:
+        st.session_state.username = None
 
-    # User authentication and navigation
+    # Page routing
     if st.session_state.page == 'login':
         login_page()
     elif st.session_state.page == 'register':
         register_page()
-    elif st.session_state.page == 'account':
-        account_page()  # Navigate to the account management page
-    elif st.session_state.page == 'app':
-        app_page()  # Navigate to the main app page
+    elif st.session_state.page == 'app' and st.session_state.logged_in:
+        app_page()
+    else:
+        st.session_state.page = 'login'
+        st.rerun()
 
+# Initialize the database when the app starts
 if __name__ == "__main__":
     init_db()
+    api_key = init_environment()
+    if api_key and isinstance(api_key, str):  # Add type check
+        os.environ['GEMINI_API_KEY'] = api_key
+    else:
+        st.error("GEMINI_API_KEY not found or invalid")
     main()

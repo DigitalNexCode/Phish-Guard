@@ -4,11 +4,22 @@ import json
 import streamlit as st
 import sqlite3
 import re  # Import regex for URL detection
-from dotenv import load_dotenv
 import os
+import google.generativeai as genai
 
-# Load environment variables from .env file
-load_dotenv()
+# Try to import dotenv, but don't fail if it's not available
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except ImportError:
+    pass
+
+def get_api_key():
+    """Get API key from environment variables or Streamlit secrets"""
+    try:
+        return st.secrets["GEMINI_API_KEY"]
+    except:
+        return os.getenv("GEMINI_API_KEY")
 
 def clean_json_response(text):
     """Clean the JSON string from markdown and escape characters."""
@@ -34,13 +45,15 @@ def is_suspicious_url(url):
     return any(keyword in url for keyword in suspicious_keywords)
 
 def analyze_email(email_content):
-    api_url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent"
-    api_key = os.getenv('GEMINI_API_KEY')
-    
+    """Analyze email content using Gemini API"""
+    api_key = get_api_key()
     if not api_key:
-        st.error("API key not found in .env file. Please add GEMINI_API_KEY to your .env file.")
-        return {"is_phishing": False, "confidence": 0.0, "reasoning": "API key missing"}
+        raise ValueError("GEMINI_API_KEY not found in environment variables or secrets")
     
+    # Configure the Gemini API
+    genai.configure(api_key=api_key)
+    
+    api_url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent"
     url_with_key = f"{api_url}?key={api_key}"
 
     headers = {
